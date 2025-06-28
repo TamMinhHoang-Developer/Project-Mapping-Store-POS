@@ -1,3 +1,4 @@
+// api/upload.js
 import { IncomingForm } from "formidable";
 import fs from "fs/promises";
 import { mapExcel } from "../backend/mapExcel.js";
@@ -11,18 +12,28 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  const form = new IncomingForm({ keepExtensions: true });
-  form.uploadDir = "/tmp";
+  const form = new IncomingForm({
+    multiples: true,
+    uploadDir: "/tmp",
+    keepExtensions: true,
+  });
 
   form.parse(req, async (err, fields, files) => {
-    if (err) return res.status(500).json({ error: "File parse error" });
+    if (err) return res.status(500).json({ error: "Error parsing form" });
 
     try {
-      const input = files.inputFile[0].filepath;
-      const template = files.templateFile[0].filepath;
-      const config = files.configFile[0].filepath;
+      const inputPath =
+        files.inputFile?.[0]?.filepath || files.inputFile?.filepath;
+      const templatePath =
+        files.templateFile?.[0]?.filepath || files.templateFile?.filepath;
+      const configPath =
+        files.configFile?.[0]?.filepath || files.configFile?.filepath;
 
-      const buffer = await mapExcel(input, template, config);
+      if (!inputPath || !templatePath || !configPath) {
+        return res.status(400).json({ error: "Missing one or more files" });
+      }
+
+      const buffer = await mapExcel(inputPath, templatePath, configPath);
 
       res.setHeader(
         "Content-Type",
@@ -34,7 +45,7 @@ export default async function handler(req, res) {
       );
       res.send(buffer);
     } catch (e) {
-      res.status(500).json({ error: e.message });
+      res.status(500).json({ error: "Processing failed: " + e.message });
     }
   });
 }
