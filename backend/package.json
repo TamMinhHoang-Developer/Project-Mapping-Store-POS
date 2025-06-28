@@ -4,6 +4,7 @@
   "type": "module",
   "dependencies": {
     "exceljs": "^4.4.0",
-    "formidable": "^3.5.4"
+    "multer": "^2.0.1",
+    "next-connect": "^1.0.0"
   }
 }

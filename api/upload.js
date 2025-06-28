@@ -1,51 +1,53 @@
-// api/upload.js
-import { IncomingForm } from "formidable";
+import nextConnect from "next-connect";
+import multer from "multer";
 import fs from "fs/promises";
 import { mapExcel } from "../backend/mapExcel.js";
 
 export const config = {
-  api: { bodyParser: false },
+  api: {
+    bodyParser: false,
+  },
 };
 
-export default async function handler(req, res) {
-  if (req.method !== "POST") {
-    return res.status(405).json({ error: "Method not allowed" });
-  }
+const upload = multer({
+  storage: multer.diskStorage({
+    destination: "/tmp",
+    filename: (req, file, cb) => cb(null, file.originalname),
+  }),
+});
 
-  const form = new IncomingForm({
-    multiples: true,
-    uploadDir: "/tmp",
-    keepExtensions: true,
-  });
+const apiRoute = nextConnect();
 
-  form.parse(req, async (err, fields, files) => {
-    if (err) return res.status(500).json({ error: "Error parsing form" });
+apiRoute.use(
+  upload.fields([
+    { name: "inputFile", maxCount: 1 },
+    { name: "templateFile", maxCount: 1 },
+    { name: "configFile", maxCount: 1 },
+  ])
+);
 
-    try {
-      const inputPath =
-        files.inputFile?.[0]?.filepath || files.inputFile?.filepath;
-      const templatePath =
-        files.templateFile?.[0]?.filepath || files.templateFile?.filepath;
-      const configPath =
-        files.configFile?.[0]?.filepath || files.configFile?.filepath;
+apiRoute.post(async (req, res) => {
+  try {
+    const input = req.files["inputFile"]?.[0]?.path;
+    const template = req.files["templateFile"]?.[0]?.path;
+    const config = req.files["configFile"]?.[0]?.path;
 
-      if (!inputPath || !templatePath || !configPath) {
-        return res.status(400).json({ error: "Missing one or more files" });
-      }
-
-      const buffer = await mapExcel(inputPath, templatePath, configPath);
-
-      res.setHeader(
-        "Content-Type",
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-      );
-      res.setHeader(
-        "Content-Disposition",
-        'attachment; filename="mapped.xlsx"'
-      );
-      res.send(buffer);
-    } catch (e) {
-      res.status(500).json({ error: "Processing failed: " + e.message });
+    if (!input || !template || !config) {
+      return res.status(400).json({ error: "Missing required files." });
     }
-  });
-}
+
+    const buffer = await mapExcel(input, template, config);
+
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    );
+    res.setHeader("Content-Disposition", 'attachment; filename="mapped.xlsx"');
+    res.send(buffer);
+  } catch (err) {
+    console.error("❌ Lỗi xử lý:", err.message);
+    res.status(500).json({ error: "Server failed: " + err.message });
+  }
+});
+
+export default apiRoute;
