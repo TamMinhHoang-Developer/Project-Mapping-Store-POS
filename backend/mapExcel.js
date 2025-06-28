@@ -1,68 +1,65 @@
-const Excel = require("exceljs");
-const fs = require("fs");
-const path = require("path");
+// backend/mapExcel.js
+import ExcelJS from 'exceljs';
+import fs from 'fs/promises';
 
-module.exports = async function mapExcel(inputPath, templatePath, mappingPath) {
-  const inputWB = new Excel.Workbook();
-  const templateWB = new Excel.Workbook();
+export async function mapExcel(inputPath, templatePath, configPath) {
+  const inputWb = new ExcelJS.Workbook();
+  const templateWb = new ExcelJS.Workbook();
 
-  await inputWB.xlsx.readFile(inputPath);
-  await templateWB.xlsx.readFile(templatePath);
+  await inputWb.xlsx.readFile(inputPath);
+  await templateWb.xlsx.readFile(templatePath);
 
-  const mapping = JSON.parse(fs.readFileSync(mappingPath, "utf-8"));
+  const config = JSON.parse(await fs.readFile(configPath, 'utf8'));
 
-  for (const sheetMap of mapping.sheets) {
-    const { inputSheet, templateSheet, startRow, startColumn, columns } =
-      sheetMap;
+  for (const sheetMap of config.sheets) {
+    const inputSheet = inputWb.getWorksheet(sheetMap.inputSheet);
+    const templateSheet = templateWb.getWorksheet(sheetMap.templateSheet);
 
-    const inputWS = inputWB.getWorksheet(inputSheet);
-    const templateWS = templateWB.getWorksheet(templateSheet);
+    if (!inputSheet || !templateSheet) continue;
 
-    if (!inputWS || !templateWS) continue;
+    // Map header column name to column index
+    const inputHeaderRow = inputSheet.getRow(sheetMap.startRow - 1);
+    const templateHeaderRow = templateSheet.getRow(sheetMap.startRow - 1);
 
-    // Build input header map (key: header text, value: column index)
-    const inputHeaderRow = inputWS.getRow(startRow - 1);
-    const inputHeaderMap = {};
+    const inputColumnMap = {};
     inputHeaderRow.eachCell((cell, colNumber) => {
-      if (cell.value) {
-        inputHeaderMap[cell.value.toString().trim()] = colNumber;
-      }
+      inputColumnMap[cell.text.trim()] = colNumber;
     });
 
-    // Build template header map (header text -> column index at template)
-    const templateHeaderRow = templateWS.getRow(startRow - 1);
-    const templateHeaderMap = {};
-    templateHeaderRow.eachCell({ includeEmpty: true }, (cell, colNumber) => {
-      if (colNumber >= startColumn && cell.value) {
-        templateHeaderMap[cell.value.toString().trim()] = colNumber;
-      }
+    const templateColumnMap = {};
+    templateHeaderRow.eachCell((cell, colNumber) => {
+      templateColumnMap[cell.text.trim()] = colNumber;
     });
 
-    // Write input data to template according to column mapping
-    const inputDataStartRow = startRow;
-    let currentOutputRow = startRow;
+    // Copy data rows
+    let rowIndex = sheetMap.startRow;
+    while (true) {
+      const inputRow = inputSheet.getRow(rowIndex);
+      if (inputRow.actualCellCount === 0) break;
 
-    for (let r = inputDataStartRow; r <= inputWS.rowCount; r++) {
-      const inputRow = inputWS.getRow(r);
-      const targetRow = templateWS.getRow(currentOutputRow++);
+      const templateRow = templateSheet.getRow(rowIndex);
+      for (const colMap of sheetMap.columns) {
+        const inputCol = inputColumnMap[colMap.input];
+        const templateCol = templateColumnMap[colMap.template];
 
-      for (const [inputColName, templateColName] of Object.entries(columns)) {
-        const inputColIndex = inputHeaderMap[inputColName];
-        const templateColIndex = templateHeaderMap[templateColName];
+        if (inputCol && templateCol) {
+          const inputCell = inputRow.getCell(inputCol);
+          const templateCell = templateRow.getCell(templateCol);
 
-        if (!inputColIndex || !templateColIndex) continue;
+          templateCell.value = inputCell.value;
 
-        const inputCell = inputRow.getCell(inputColIndex);
-        const targetCell = targetRow.getCell(templateColIndex);
-
-        targetCell.value = inputCell.value;
-        targetCell.style = { ...inputCell.style };
+          // Copy style from template header (if exists)
+          const styleRef = templateHeaderRow.getCell(templateCol).style;
+          if (styleRef) {
+            templateCell.style = styleRef;
+          }
+        }
       }
+
+      rowIndex++;
     }
   }
 
-  // Save output file
-  const outputPath = path.join(__dirname, "Output.xlsx");
-  await templateWB.xlsx.writeFile(outputPath);
-  return outputPath;
-};
+  const buffer = await templateWb.xlsx.writeBuffer();
+  return buffer;
+}
